@@ -200,3 +200,122 @@ def  plot_ef2(n_points, er, cov, style = ".-"):
     "Returns": rets, "Volatility": vols
     })
     return ef.plot.line(x="Volatility", y="Returns",style = style)
+
+from scipy.optimize import minimize 
+def minimize_vol(target_return, er, cov):
+    """
+    target_ret -> W
+    """
+    n = er.shape[0]
+    init_guess = np.repeat(1/n, n)
+    bounds = ((0.0, 1.0),)*n
+    weights_sum_to_1 = {'type': 'eq',
+                        'fun': lambda weights: np.sum(weights) - 1
+    }
+    return_is_target = {'type': 'eq',
+                        'args': (er,),
+                        'fun': lambda weights, er: target_return - portfolio_return(weights,er)
+    }
+    
+    results = minimize(portfolio_vol, init_guess,
+                       args=(cov,), method="SLSQP",
+                       options={"disp":False},
+                       constraints=(return_is_target, weights_sum_to_1),
+                       bounds=bounds
+                      )
+    return results.x
+
+def optimal_weights(n_points, er, cov):
+    """
+    -> list of weights to run the optimizer on to minimize the vol
+    """
+    target_rs = np.linspace(er.min(), er.max(), n_points)
+    weights = [minimize_vol(target_return, er, cov) for target_return in target_rs ] 
+    return weights
+
+def msr(riskfree_rate, er, cov):
+    """
+    Returns the weights of the portfolio that gives you the maximum sharpe ratio
+    given the riskfree rate and expected returns and a covariance matrix
+    """
+    n = er.shape[0]
+    init_guess = np.repeat(1/n, n)
+    bounds = ((0.0, 1.0),) * n # an N-tuple of 2-tuples!
+    # construct the constraints
+    weights_sum_to_1 = {'type': 'eq',
+                        'fun': lambda weights: np.sum(weights) - 1
+    }
+    def neg_sharpe(weights, riskfree_rate, er, cov):
+        """
+        Returns the negative of the sharpe ratio
+        of the given portfolio
+        """
+        r = portfolio_return(weights, er)
+        vol = portfolio_vol(weights, cov)
+        return -(r - riskfree_rate)/vol
+    
+    weights = minimize(neg_sharpe, init_guess,
+                       args=(riskfree_rate, er, cov), method='SLSQP',
+                       options={'disp': False},
+                       constraints=(weights_sum_to_1,),
+                       bounds=bounds)
+    return weights.x
+def gmv(cov):
+    """
+    Returns the weights of the Global Minimum Vol portfolio
+    Given the Covariance Matrix
+
+    -- If all returns are the same, the return of every portfolio will 
+    be equal. This way, maximize the sharpe ratio is equivalent to minimize 
+    the variance of the portfolio.
+    """
+
+    n = cov.shape[0]
+    return msr(0, np.repeat(1, n), cov)
+
+def  plot_ef(n_points, er, cov, style = ".-", show_cml=False, riskfree_rate=0,
+    show_ew=False, show_gmv=False):
+    """
+    Plots the n-asset efficient frontier
+    """
+
+    weights = optimal_weights(n_points, er, cov)
+    rets = [portfolio_return(w, er) for w in weights]
+    vols = [portfolio_vol(w, cov) for w in weights]
+    ef = pd.DataFrame({
+    "Returns": rets, "Volatility": vols
+    })
+    ax = ef.plot.line(x="Volatility", y="Returns",style = style)
+
+    if show_ew:
+        n = er.shape[0]
+        w_ew = np.repeat(1/n, n)
+        r_ew = portfolio_return(w_ew, er)
+        vol_ew = portfolio_vol(w_ew, cov)
+        #display EW
+        ax.plot([vol_ew], [r_ew], color="goldenrod", marker="o", 
+            markersize=12)
+
+    if show_gmv:
+        w_gmv = gmv(cov)
+        r_gmv = portfolio_return(w_gmv, er)
+        vol_gmv = portfolio_vol(w_gmv, cov)
+        #display EW
+        ax.plot([vol_gmv], [r_gmv], color="midnightblue", marker="o",
+         markersize=10)
+
+
+    if show_cml: 
+        w_msr = msr(riskfree_rate, er, cov)
+        r_msr = portfolio_return(w_msr, er)
+        vol_msr = portfolio_vol(w_msr, cov)
+        #addCML
+        cml_x = [0, vol_msr]
+        cml_y = [riskfree_rate, r_msr]
+
+        ax.plot(cml_x, cml_y, color="green", marker="o", linestyle="dashed",
+            markersize=12, linewidth=2)
+
+    return ax
+
+
